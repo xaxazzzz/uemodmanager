@@ -40,12 +40,17 @@ public sealed partial class InstallDialogViewModel : LocalizedObservableObject
         // Files for the exe folder that do not look like a loader wait for the player.
         selecting = true;
         var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var option in Packages)
+        var alternatives = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var option in Packages.OrderBy(p => p.Package.IsProxyEntry && p.Package.Target != DeployTarget.InstallRoot))
         {
             var names = option.Package.RelativePaths.Select(p => $"{option.Package.Target}|{p}").ToList();
-            option.IsSelected = !option.Package.IsUncertain && !names.Any(taken.Contains);
+            option.IsSelected = !option.Package.IsUncertain && !option.Package.IsCompatibilityRoute && !names.Any(taken.Contains)
+                && (option.Package.AlternativeOf is null || !alternatives.Contains(option.Package.AlternativeOf));
             if (option.IsSelected)
+            {
                 taken.UnionWith(names);
+                if (option.Package.AlternativeOf is { } key) alternatives.Add(key);
+            }
         }
         selecting = false;
         Recheck();
@@ -73,7 +78,32 @@ public sealed partial class InstallDialogViewModel : LocalizedObservableObject
         }
     }
 
-    public IReadOnlyList<PackageOptionViewModel> Packages { get; }
+    public IReadOnlyList<PackageOptionViewModel> Packages { get; private set; }
+
+    public bool CanMapManually => preview.Packages.Count == 0 && !preview.ContainsUe4ssRuntime && preview.NestedArchiveCount == 0;
+
+    [ObservableProperty]
+    private string manualDestination = "";
+
+    [RelayCommand]
+    private void MapManually()
+    {
+        try
+        {
+            manager.MapUnrecognized(preview, ManualDestination);
+            selecting = true;
+            Packages = preview.Packages.Select(p => new PackageOptionViewModel(p, OnOptionChanged) { IsSelected = true }).ToList();
+            selecting = false;
+            Recheck();
+            OnPropertyChanged(string.Empty);
+        }
+        catch (ModException ex)
+        {
+            Problems.Clear();
+            Problems.Add(L.F(ex.Text));
+        }
+        finally { selecting = false; }
+    }
 
     public bool HasPackages => Packages.Count > 0;
 
@@ -131,9 +161,11 @@ public sealed partial class InstallDialogViewModel : LocalizedObservableObject
         selecting = true;
         try
         {
-            if (option.IsSelected && option.IsVariant)
+            if (option.IsSelected)
             {
-                foreach (var other in Packages.Where(p => p != option && p.Package.VariantOf == option.Package.VariantOf))
+                foreach (var other in Packages.Where(p => p != option
+                    && (option.Package.VariantOf is not null && p.Package.VariantOf == option.Package.VariantOf
+                        || option.Package.AlternativeOf is not null && p.Package.AlternativeOf == option.Package.AlternativeOf)))
                     other.IsSelected = false;
             }
         }
@@ -222,7 +254,9 @@ public sealed partial class PackageOptionViewModel(PackageGroup package, Action<
     public PackageGroup Package => package;
 
     /// <summary>A variant shows what tells it apart, such as "x2"; other packages their folder and name.</summary>
-    public string Label => package.Variant ?? package.Label;
+    public string Label => package.IsCompatibilityRoute
+        ? L.F($"{package.Name} — Mods Menu compatibility route (JavaScript)")
+        : package.Variant ?? package.Label;
 
     /// <summary>One of several variants: shown as a single choice.</summary>
     public bool IsVariant => package.VariantOf is not null;

@@ -7,3 +7,4 @@ TestResults/
 *.suo
 *_wpftmp.csproj
 dist-ms2/
+.tmp/

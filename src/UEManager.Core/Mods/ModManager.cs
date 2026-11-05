@@ -18,7 +18,7 @@ namespace UEManager.Core.Mods;
 /// chooses another install while enabled mods are still in the first one, nothing
 /// changes until <see cref="MoveHere"/> has moved them.
 /// </summary>
-public sealed class ModManager
+public sealed partial class ModManager
 {
     /// <summary>UE4SS starts a mod folder holding this file, whatever mods.txt says, so mods.txt is never edited.</summary>
     private const string Ue4ssEnabledMarker = "enabled.txt";
@@ -118,6 +118,40 @@ public sealed class ModManager
         }
     }
 
+    /// <summary>Maps an unrecognized download only after the player supplies its destination below the game root.</summary>
+    public void MapUnrecognized(InstallPreview preview, string destination)
+    {
+        if (preview.Packages.Count != 0 || preview.ContainsUe4ssRuntime || preview.NestedArchiveCount != 0)
+            throw new ModException($"This download cannot use manual mapping.");
+        destination = destination.Trim().Replace('\\', '/');
+        var sourceRoot = Directory.Exists(preview.Source)
+            ? Path.Combine(preview.StagingDir, Path.GetFileName(Path.TrimEndingDirectorySeparator(preview.Source))) : preview.StagingDir;
+        var files = Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories)
+            .Where(f => !SettingsFiles.IsDocument(f) && !FileSystem.HasExtension(f, [".log", ".tmp"]))
+            .Order(StringComparer.OrdinalIgnoreCase).ToList();
+        if (files.Count == 0) throw new ModException($"No files are available for manual mapping.");
+        var mapped = files.Select(f => destination + "/" + Path.GetRelativePath(sourceRoot, f).Replace('\\', '/')).ToList();
+        foreach (var path in mapped)
+        {
+            if (PackageScanner.IsProtectedSavedPath(Path.GetRelativePath(Game.RootPath, ArchiveStager.SafeTarget(Game.RootPath, path))))
+                throw new ModException($"Saves, logs and crash reports cannot be managed as mods: {path}");
+            ValidateDestination(DeployTarget.InstallRoot, path);
+        }
+        preview.Packages = [PackageGroup.GameFiles(preview.SuggestedName, "", files, mapped)];
+        preview.IgnoredFiles = preview.IgnoredFiles.Where(f => !files.Any(source => string.Equals(
+            Path.GetRelativePath(preview.StagingDir, source).Replace('\\', '/'), f, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    private void ValidateDestination(DeployTarget target, string relativePath)
+    {
+        if (relativePath.Split('/', '\\').Any(part => part != "." && (part.EndsWith('.') || part.EndsWith(' '))))
+            throw new ModException($"The target path has an ambiguous Windows name: {relativePath}");
+        var full = ArchiveStager.SafeTarget(TargetFolder(target), relativePath);
+        for (var item = full; item is not null; item = Path.GetDirectoryName(item))
+            if ((File.Exists(item) || Directory.Exists(item)) && File.GetAttributes(item).HasFlag(FileAttributes.ReparsePoint))
+                throw new ModException($"The target path contains a link: {relativePath}");
+    }
+
     /// <summary>Checks a selection against the game folders and the installed mods.</summary>
     /// <param name="catalogId">
     /// The catalog entry the download comes from, if any. The installed mod with the same id is the
@@ -147,6 +181,9 @@ public sealed class ModManager
         }
         foreach (var package in selected)
         {
+            foreach (var path in package.RelativePaths)
+                try { ValidateDestination(package.Target, path); }
+                catch (ModException ex) { problems.Add(ex.Text); }
             problems.AddRange(package.Problems);
             warnings.AddRange(package.Warnings);
         }
@@ -160,9 +197,14 @@ public sealed class ModManager
             .SelectMany(p => p.RelativePaths.Select((path, i) => (p.Target, Path: path, Source: p.Files[i])))
             .ToList();
         // A shared library that goes with several selected UE4SS mods is the same file each time.
-        foreach (var duplicate in entries.GroupBy(e => (e.Target, e.Path.ToUpperInvariant()))
+        foreach (var duplicate in entries.GroupBy(e => Path.GetFullPath(Path.Combine(TargetFolder(e.Target), Local(e.Path))), StringComparer.OrdinalIgnoreCase)
                      .Where(g => g.Select(e => e.Source).Distinct(StringComparer.OrdinalIgnoreCase).Count() > 1))
             problems.Add($"{duplicate.First().Path} is in more than one selected part. Select only one of them.");
+        // One of a group of alternatives goes into the game: the proxy DLLs that start one loader, or a mod's
+        // original place and its Mods Menu route. All of them together would clash.
+        foreach (var alternatives in selected.Where(p => p.AlternativeOf is not null)
+                     .GroupBy(p => p.AlternativeOf, StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+            problems.Add($"{string.Join(" and ", alternatives.Select(p => $"\"{p.Label}\""))} are alternatives. Select only one of them.");
         var shared = entries.Where(e => SharedFiles.Is(e.Target, e.Path)).DistinctBy(e => e.Path.ToUpperInvariant()).ToList();
 
         ModRecord? replaces;
@@ -181,7 +223,8 @@ public sealed class ModManager
                     if (!owners.Contains(owner))
                         owners.Add(owner);
                 }
-                else if (target == DeployTarget.ExeFolder && ue4ss is not null && ue4ss.ContainsKey(path))
+                else if (target is DeployTarget.ExeFolder or DeployTarget.InstallRoot && ue4ss is not null && ue4ss.Keys.Any(key => Path.GetFullPath(Path.Combine(Game.BinariesPath, Local(key)))
+                    .Equals(Path.GetFullPath(Path.Combine(TargetFolder(target), Local(path))), StringComparison.OrdinalIgnoreCase)))
                 {
                     problems.Add($"{path} belongs to UE4SS, which the manager installed. Uninstall UE4SS first, or remove that file from the download.");
                 }
@@ -1611,7 +1654,8 @@ public sealed class ModManager
             if (Matches(file.DeployedPath!, file))
                 continue;
             File.Copy(file.DeployedPath!, LibraryPath(mod, file), overwrite: true);
-            file.DefaultSha256 ??= file.Sha256;
+            if (!file.Kept)
+                file.DefaultSha256 ??= file.Sha256;
             file.Size = new FileInfo(file.DeployedPath!).Length;
             file.Sha256 = FileSystem.Sha256(file.DeployedPath!);
             Log.Info($"Kept the player's changes to {file.FileName} of \"{mod.Name}\".");
@@ -1620,7 +1664,7 @@ public sealed class ModManager
 
     /// <summary>Settings files of a mod that the player changed: in the game, or (saved there before) in the library copy.</summary>
     private static List<string> EditedSettings(ModRecord mod) => mod.Files
-        .Where(f => f.IsEdited
+        .Where(f => f.NeedsSettingsBackup
             || (f.IsPlayerFile && f.DeployedPath is not null && File.Exists(f.DeployedPath) && !Matches(f.DeployedPath, f)))
         .Select(f => f.FileName)
         .ToList();
@@ -1628,7 +1672,7 @@ public sealed class ModManager
     /// <summary>The library copy of a settings file the player changed in the mod being replaced, or null.</summary>
     private string? EditedSettingsCopy(ModRecord? old, DeployTarget target, string relativePath)
     {
-        var file = old?.Files.FirstOrDefault(f => f.IsEdited && IsSameFile(f, target, relativePath));
+        var file = old?.Files.FirstOrDefault(f => f.NeedsSettingsBackup && IsSameFile(f, target, relativePath));
         return file is null ? null : LibraryPath(old!, file);
     }
 
@@ -1639,7 +1683,7 @@ public sealed class ModManager
     /// <returns>The backup folder, or null when the player changed nothing.</returns>
     private string? BackUpEditedSettings(ModRecord mod)
     {
-        var edited = mod.Files.Where(f => f.IsEdited).ToList();
+        var edited = mod.Files.Where(f => f.NeedsSettingsBackup).ToList();
         if (edited.Count == 0)
             return null;
         var folder = Path.Combine(paths.BackupDir(Game.Profile.Id), $"{DateTime.Now:yyyyMMdd-HHmmss} {FileSystem.SafeName(mod.Name, mod.Id)}");
@@ -1738,8 +1782,9 @@ public sealed class ModManager
     private static void RemoveEmptyFolders(ModFileRecord file, string deployedPath)
     {
         var name = !file.IsGameFile ? file.FileName
-            : file.Target == DeployTarget.InstallRoot ? PackageScanner.BelowScriptFolder(file.FileName)
-            : null;
+            : file.Target == DeployTarget.InstallRoot
+                ? (PackageScanner.BelowScriptFolder(file.FileName) ?? PackageScanner.BelowLoaderFolder(file.FileName))
+                : null;
         if (name is not null)
             RemoveEmptyFolders(name, deployedPath);
     }
@@ -1777,8 +1822,9 @@ public sealed class ModManager
         return variants.Count == 0 ? null : string.Join(", ", variants);
     }
 
-    private static bool IsSameFile(ModFileRecord file, DeployTarget target, string relativePath) =>
-        file.Target == target && string.Equals(file.FileName, relativePath, StringComparison.OrdinalIgnoreCase);
+    private bool IsSameFile(ModFileRecord file, DeployTarget target, string relativePath) =>
+        Path.GetFullPath(Path.Combine(TargetFolder(file.Target), Local(file.FileName))).Equals(
+            Path.GetFullPath(Path.Combine(TargetFolder(target), Local(relativePath))), StringComparison.OrdinalIgnoreCase);
 
     private static string Local(string relativePath) => relativePath.Replace('/', Path.DirectorySeparatorChar);
 

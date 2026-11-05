@@ -138,6 +138,14 @@ public sealed class ModFileRecord
     public bool IsEdited => IsPlayerFile && !string.Equals(Sha256, DefaultSha256 ?? Sha256, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Whether the player's version of the file must be backed up before the library copy goes away. That is so
+    /// for an edited settings file, and always for one adopted from the game: the manager never saw the author's
+    /// original, so the player's current version is the only one there is.
+    /// </summary>
+    [JsonIgnore]
+    public bool NeedsSettingsBackup => IsEdited || Kept || (IsPlayerFile && DefaultSha256 is null);
+
+    /// <summary>
     /// A Lua library in UE4SS's shared folder ("shared/json/json.lua"), next to UE4SS's own. Several mods may bring
     /// the same one: one copy in the game serves them all, and it goes when the last of them is disabled.
     /// </summary>
@@ -192,6 +200,14 @@ public static partial class SettingsFiles
     {
         if (target is DeployTarget.Mods or DeployTarget.LogicMods)
             return IsPakSettings(relativePath);
+        if (target == DeployTarget.InstallRoot)
+        {
+            // A script mod's settings, straight in its folder, or a settings file a pak mod keeps in ~mods, such as
+            // "ProjectPBZ/PBZModLoader/mods/Mod/config.json" or "ProjectPBZ/Content/Paks/~mods/Buff.json".
+            return IsScriptSettings(relativePath)
+                || (relativePath.Split('/').Contains(PackageScanner.PakModsFolder, StringComparer.OrdinalIgnoreCase)
+                    && IsPakSettings(relativePath));
+        }
         if (target != DeployTarget.Ue4ssMods)
             return false;
         // A UE4SS mod's settings: Scripts/config.lua, or Scripts/config.json and the like, which the mod reads itself.
@@ -202,9 +218,34 @@ public static partial class SettingsFiles
             && FileSystem.HasExtension(parts[2], Ue4ssSettingsExtensions);
     }
 
-    /// <summary>How the player knows the file: "Scripts/config.lua" for "ModName/Scripts/config.lua", else its name.</summary>
+    /// <summary>How the player knows the file: "Scripts/config.lua" for "ModName/Scripts/config.lua", else its name.
+    /// A script mod's settings sit deep below the install folder, so only the file's own name is shown.</summary>
     public static string Name(string relativePath) =>
-        relativePath.IndexOf('/') is var slash and >= 0 ? relativePath[(slash + 1)..] : relativePath;
+        IsScriptSettings(relativePath) ? Path.GetFileName(relativePath)
+        : relativePath.IndexOf('/') is var slash and >= 0 ? relativePath[(slash + 1)..] : relativePath;
+
+    /// <summary>
+    /// A settings file straight in a script mod's own folder, such as "ProjectPBZ/PBZModLoader/mods/Mod/config.json"
+    /// or "ProjectPBZ/Content/JavaScript/PBZModsMenu/Mods/Mod/settings.ini", which the mod reads itself.
+    /// </summary>
+    private static bool IsScriptSettings(string relativePath)
+    {
+        var parts = relativePath.Split('/', '\\');
+        for (var i = 0; i + 3 < parts.Length; i++)
+        {
+            var mods = parts[i].Equals(PackageScanner.LoaderFolder, StringComparison.OrdinalIgnoreCase)
+                ? PackageScanner.LoaderModsFolder
+                : parts[i].Equals(PackageScanner.MenuFolder, StringComparison.OrdinalIgnoreCase)
+                    ? PackageScanner.MenuModsFolder
+                    : null;
+            if (mods is null || !parts[i + 1].Equals(mods, StringComparison.OrdinalIgnoreCase) || i + 4 != parts.Length)
+                continue;
+            if (Ue4ssSettingsNames.Contains(Path.GetFileNameWithoutExtension(parts[i + 3]), StringComparer.OrdinalIgnoreCase)
+                && FileSystem.HasExtension(parts[i + 3], Ue4ssSettingsExtensions))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>Names that mark a document, not settings: readme, license, change log, credits, install notes.</summary>
     [GeneratedRegex(@"^(read[ _-]?me|licen[cs]e|change[ _-]?log|changes|credits|install|notice|copying|authors)", RegexOptions.IgnoreCase)]

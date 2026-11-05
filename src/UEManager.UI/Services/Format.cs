@@ -20,7 +20,26 @@ internal static class Format
         ModTypes.Ue4ssFiles => L.T("UE4SS files"),
         ModTypes.GameFiles => L.T("Game files"),
         ModTypes.ExeFiles => L.T("Exe files"),
+        ModTypes.LoaderRuntime => L.T("Loader files"),
         _ => typeLabel,
+    };
+
+    /// <summary>What the loaders' notes say of a script mod at the last game start, apart from deployed and enabled.</summary>
+    public static (string Text, string Tone, string Glyph, string Hint) Runtime(LoaderRuntimeState state) => state switch
+    {
+        LoaderRuntimeState.Discovered => (L.T("Discovered"), "warn", "\uE9CE",
+            L.T("The loader discovered this mod, but no successful load was recorded.")),
+        LoaderRuntimeState.Failed => (L.T("Load failed"), "bad", "\uE7BA",
+            L.T("The loader reported a failure for this mod. Check its log for details.")),
+        LoaderRuntimeState.Loaded => (L.T("Loaded"), "good", "\uE73E",
+            L.T("The script loader found this mod and loaded it at the last game start.")),
+        LoaderRuntimeState.OffInLoader => (L.T("Off in the loader"), "warn", "\uE7BA",
+            L.T("The script loader knows this mod, but has it switched off. Switch it on in the loader, or enable the mod here.")),
+        LoaderRuntimeState.NotDiscovered => (L.T("Not discovered"), "warn", "\uE7BA",
+            L.T("The script loader did not find this mod at the last game start. It may not load where the mod's files are.")),
+        LoaderRuntimeState.Unverified => (L.T("Not verified"), "", "\uE9CE",
+            L.T("No note of the last game start was found, so whether the loader loaded the mod is not known. Start the game once to find out.")),
+        _ => ("", "", "", ""),
     };
 
     /// <summary>

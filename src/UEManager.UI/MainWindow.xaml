@@ -330,6 +330,12 @@
             <views:InstallDialog DataContext="{Binding InstallDialog}" Margin="40" />
         </Grid>
 
+        <!-- ===== Adoption review ===== -->
+        <Grid Grid.Row="1" Background="{StaticResource Brush.Overlay}"
+              Visibility="{Binding AdoptionDialog, Converter={StaticResource VisibleIfSet}}">
+            <views:AdoptionDialog DataContext="{Binding AdoptionDialog}" Margin="40" />
+        </Grid>
+
         <!-- ===== UE4SS install guide (can open over the install review) ===== -->
         <Grid Grid.Row="1" Background="{StaticResource Brush.Overlay}"
               Visibility="{Binding Ue4ssGuide, Converter={StaticResource VisibleIfSet}}">

@@ -42,6 +42,14 @@
                         <Button Style="{StaticResource Button.Name}" Content="{Binding Name}"
                                 Command="{Binding ShowDetailsCommand}" ToolTip="{ui:Loc 'Show the details of this mod and every file it placed'}" />
                         <TextBlock Margin="0,3,0,0" Style="{StaticResource Text.Small}" Text="{Binding Detail}" />
+                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0"
+                                    Visibility="{Binding HasRuntimeState, Converter={StaticResource Visible}}"
+                                    ToolTip="{Binding RuntimeHint}">
+                            <TextBlock Style="{StaticResource Text.Icon}" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{Binding RuntimeTone, Converter={StaticResource Tone}}" Text="{Binding RuntimeGlyph}" />
+                            <TextBlock Margin="6,0,0,0" FontSize="12" VerticalAlignment="Center"
+                                       Foreground="{Binding RuntimeTone, Converter={StaticResource Tone}}" Text="{Binding RuntimeText}" />
+                        </StackPanel>
                         <Button Margin="0,4,0,0" Style="{StaticResource Button.Link}" Foreground="{StaticResource Brush.Danger}"
                                 Content="{ui:Loc 'UE4SS reported errors at the last game start'}" Command="{Binding ShowUe4ssErrorsCommand}"
                                 ToolTip="{ui:Loc 'Show the lines of the UE4SS log that name this mod'}"
@@ -106,6 +114,9 @@
                 <Button Style="{StaticResource Button.Primary}" Content="{ui:Loc 'Install from 7z/zip/rar…'}"
                         ui:Icon.Glyph="&#xE896;" Command="{Binding InstallFromArchiveCommand}" />
                 <Button Margin="8,0,0,0" Content="{ui:Loc 'Install from folder…'}" ui:Icon.Glyph="&#xE8B7;" Command="{Binding InstallFromFolderCommand}" />
+                <Button Margin="8,0,0,0" Content="{ui:Loc 'Adopt installed mods…'}" ui:Icon.Glyph="&#xE7B3;"
+                        Command="{Binding ScanForAdoptionCommand}"
+                        ToolTip="{ui:Loc 'Finds mods that are already in the game but not in this list, and takes them over where they are'}" />
             </StackPanel>
         </Grid>
 

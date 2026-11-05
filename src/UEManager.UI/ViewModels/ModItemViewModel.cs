@@ -19,10 +19,21 @@ public sealed partial class ModItemViewModel : LocalizedObservableObject
         this.libraryFolder = libraryFolder;
         Integrity = ModManager.Integrity(record);
         HasUe4ssErrors = owner.HadUe4ssErrors(record);
+        Runtime = Format.Runtime(owner.LoaderState(record));
     }
 
     /// <summary>UE4SS reported errors in this mod at the last game start.</summary>
     public bool HasUe4ssErrors { get; }
+
+    /// <summary>What the script loaders' notes say of this script mod, apart from its deployed and enabled state.</summary>
+    public (string Text, string Tone, string Glyph, string Hint) Runtime { get; }
+
+    public string RuntimeText => Runtime.Text;
+    public string RuntimeTone => Runtime.Tone;
+    public string RuntimeGlyph => Runtime.Glyph;
+    public string RuntimeHint => Runtime.Hint;
+
+    public bool HasRuntimeState => Runtime.Text.Length > 0;
 
     [RelayCommand]
     private void ShowUe4ssErrors() => owner.ShowUe4ssErrors(record);
@@ -50,7 +61,7 @@ public sealed partial class ModItemViewModel : LocalizedObservableObject
     public bool HasSettings => record.Files.Any(f => f.IsSettingsFile);
 
     /// <summary>The mod has a settings file or one whose changed version the player kept: Reset settings puts back the mod's own.</summary>
-    public bool CanResetSettings => record.Files.Any(f => f.IsPlayerFile);
+    public bool CanResetSettings => record.Files.Any(f => f.IsPlayerFile && f.DefaultSha256 is not null);
 
     /// <summary>The settings files in the game, for the settings editor; none while the mod is disabled.</summary>
     public IReadOnlyList<SettingsFileItem> DeployedSettingsFiles =>

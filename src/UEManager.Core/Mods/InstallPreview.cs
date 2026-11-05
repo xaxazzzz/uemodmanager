@@ -24,10 +24,10 @@ public sealed class InstallPreview : IDisposable
 
     public string StagingDir { get; }
 
-    public IReadOnlyList<PackageGroup> Packages { get; }
+    public IReadOnlyList<PackageGroup> Packages { get; internal set; }
 
     /// <summary>Files in the download that are not packages, such as readmes and screenshots: their paths from its top.</summary>
-    public IReadOnlyList<string> IgnoredFiles { get; }
+    public IReadOnlyList<string> IgnoredFiles { get; internal set; }
 
     public int IgnoredFileCount => IgnoredFiles.Count;
 

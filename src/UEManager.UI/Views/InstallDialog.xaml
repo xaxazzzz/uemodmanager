@@ -29,6 +29,12 @@
             <ScrollViewer Margin="0,20,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
 
+                    <StackPanel Margin="0,0,0,14" Visibility="{Binding CanMapManually, Converter={StaticResource Visible}}">
+                        <TextBlock TextWrapping="Wrap" Text="{ui:Loc 'Unknown layout: enter the destination relative to the game folder, as instructed by the mod author.'}" />
+                        <TextBox Margin="0,8,0,8" Text="{Binding ManualDestination, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button HorizontalAlignment="Left" Content="{ui:Loc 'Preview this destination'}" Command="{Binding MapManuallyCommand}" />
+                    </StackPanel>
+
                     <!-- Name and version -->
                     <Grid>
                         <Grid.ColumnDefinitions>

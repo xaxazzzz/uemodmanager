@@ -29,6 +29,12 @@ public enum PackageKind
     /// dxgi.dll, a ReShade add-on, an .asi loader, and the files that load with them.
     /// </summary>
     ExeFiles,
+
+    /// <summary>A script mod folder of a script loader, such as PBZModLoader's mods/&lt;id&gt; or Mods Menu's Mods/&lt;id&gt;.</summary>
+    ScriptMod,
+
+    /// <summary>A script loader's own runtime: its bootstrap, manager and support files, without the mods.</summary>
+    ScriptRuntime,
 }
 
 /// <summary>
@@ -37,7 +43,7 @@ public enum PackageKind
 /// </summary>
 public sealed class PackageGroup
 {
-    private PackageGroup(string name, string folder, IReadOnlyList<string> files, IReadOnlyList<string> relativePaths,
+    internal PackageGroup(string name, string folder, IReadOnlyList<string> files, IReadOnlyList<string> relativePaths,
         PackageKind kind, DeployTarget target)
     {
         Name = name;
@@ -109,6 +115,24 @@ public sealed class PackageGroup
     /// </summary>
     public bool IsUncertain { get; internal init; }
 
+    /// <summary>The alternatives this part belongs to, such as the proxy DLLs that start one loader, or a mod's original
+    /// loader and the Mods Menu route. Only one part of a group can be installed; null when there is no choice.</summary>
+    public string? AlternativeOf { get; internal set; }
+
+    /// <summary>Whether every file of this part is a proxy DLL that starts a loader, so one of them is enough.</summary>
+    public bool IsProxyEntry { get; internal set; }
+
+    /// <summary>
+    /// A script mod routed to Mods Menu instead of its own loader. Offered beside the original only when the mod
+    /// has a main.js; the player chooses one of the two.
+    /// </summary>
+    public bool IsCompatibilityRoute { get; internal init; }
+
+    /// <summary>Whether the mod's own main.js sits straight in its folder, so Mods Menu would load it.</summary>
+    internal bool HasDirectMainJs => RelativePaths.Any(path => path.Split('/') is [.., var folder, var file]
+        && file.Equals("main.js", StringComparison.OrdinalIgnoreCase)
+        && folder.Equals(Name, StringComparison.OrdinalIgnoreCase));
+
     public string TypeLabel => ModTypes.Label(RelativePaths.Select(p => (Target, p)));
 
     internal static PackageGroup Packaged(string name, string folder, IReadOnlyList<string> files, DeployTarget target)
@@ -141,6 +165,28 @@ public sealed class PackageGroup
         var ordered = files.Order(StringComparer.OrdinalIgnoreCase).ToList();
         var relative = ordered.Select(f => name + "/" + Path.GetRelativePath(root, f).Replace('\\', '/')).ToList();
         return new PackageGroup(name, folder, ordered, relative, PackageKind.Ue4ssFolder, DeployTarget.Ue4ssMods);
+    }
+
+    /// <summary>A script loader's mod folder, kept whole below the install folder, as the download places it.</summary>
+    internal static PackageGroup ScriptMod(string name, string folder, IReadOnlyList<string> files, IReadOnlyList<string> relativePaths)
+    {
+        var placed = files
+            .Select((file, i) => (File: file, Place: relativePaths[i].Replace('\\', '/')))
+            .OrderBy(f => f.Place, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new PackageGroup(name, folder, placed.Select(f => f.File).ToList(), placed.Select(f => f.Place).ToList(),
+            PackageKind.ScriptMod, DeployTarget.InstallRoot);
+    }
+
+    /// <summary>A script loader's own runtime: its bootstrap, manager and support files, without the mods.</summary>
+    internal static PackageGroup ScriptRuntime(string name, string folder, IReadOnlyList<string> files, IReadOnlyList<string> relativePaths)
+    {
+        var placed = files
+            .Select((file, i) => (File: file, Place: relativePaths[i].Replace('\\', '/')))
+            .OrderBy(f => f.Place, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return new PackageGroup(name, folder, placed.Select(f => f.File).ToList(), placed.Select(f => f.Place).ToList(),
+            PackageKind.ScriptRuntime, DeployTarget.InstallRoot);
     }
 
     /// <summary>
@@ -180,23 +226,13 @@ public sealed class PackageGroup
         };
     }
 
-    /// <summary>
-    /// Proxy DLLs that loader mods such as ReShade, OptiScaler and .asi loaders put next to a game's exe, so Windows
-    /// loads them in place of its own.
-    /// </summary>
-    private static readonly string[] ProxyDllNames =
-    [
-        "dxgi", "d3d9", "d3d11", "d3d12", "dinput8", "version", "winmm", "winhttp", "dsound", "xinput1_3", "xinput1_4",
-        "opengl32", "nvngx",
-    ];
-
     /// <summary>A file in the exe folder that is clearly a loader: a known proxy DLL, a ReShade add-on, an .asi.</summary>
     private static bool IsKnownLoader(string place)
     {
         var name = Path.GetFileName(place);
         return FileSystem.HasExtension(name, [".addon64", ".addon32", ".asi"])
             || (FileSystem.HasExtension(name, [".dll"])
-                && ProxyDllNames.Contains(Path.GetFileNameWithoutExtension(name), StringComparer.OrdinalIgnoreCase));
+                && PackageScanner.ProxyDllNames.Contains(Path.GetFileNameWithoutExtension(name), StringComparer.OrdinalIgnoreCase));
     }
 }
 
@@ -291,7 +327,16 @@ public static class PackageScanner
         // A file the download places in one of the game's own folders, such as
         // "ProjectPBZ/Saved/EnhancedInputUserSettings.sav" or "platform/steam/dxgi.dll": a keybinding preset, a settings
         // file the game reads, a script, or a mod file next to the exe. Each file keeps its path below the install folder.
-        var claimed = drafts.SelectMany(d => d.Files).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A script loader's tree is claimed first: its runtime, and one folder per mod below its mods folder.
+        var loaderClaims = files
+            .Where(f => !FileSystem.HasExtension(f, FileSystem.ArchiveExtensions) && !SettingsFiles.IsDocument(f))
+            .Select(f => (File: f, Claim: LoaderClaimOf(RelativePath(root, f), projectFolder)))
+            .Where(f => f.Claim is not null)
+            .Select(f => (f.File, Claim: f.Claim!))
+            .ToList();
+        var claimed = drafts.SelectMany(d => d.Files)
+            .Concat(loaderClaims.Select(c => c.File))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var gameFiles = files
             .Where(f => !claimed.Contains(f) && !FileSystem.HasExtension(f, FileSystem.ArchiveExtensions) && !SettingsFiles.IsDocument(f))
             .Select(f => (File: f, Path: GameFilePath(RelativePath(root, f), projectFolder, exeFolder)))
@@ -314,6 +359,45 @@ public static class PackageScanner
                         : PackageGroup.Ue4ssMod(d.Name, folder, d.Ue4ssRoot, d.Files, d.SharedRoot);
             })
             .ToList();
+
+        // Each folder of a script loader's mods is one part, and the loader's own runtime is another: a mod
+        // installs and leaves whole, and updating the loader does not touch the mods inside it.
+        foreach (var group in loaderClaims.Where(c => c.Claim.ModRoot is not null)
+                     .GroupBy(c => c.Claim.ModRoot!, StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group.OrderBy(c => c.Claim.Path, StringComparer.OrdinalIgnoreCase).ToList();
+            var name = group.Key.Split('/')[^1];
+            var folder = DownloadFolderOf(root, ordered[0].File, ordered[0].Claim.Path, upFolders: 1);
+            packages.Add(PackageGroup.ScriptMod(name, folder,
+                ordered.Select(c => c.File).ToList(), ordered.Select(c => c.Claim.Path).ToList()));
+        }
+        foreach (var group in loaderClaims.Where(c => c.Claim.ModRoot is null)
+                     .GroupBy(c => c.Claim.Loader, StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group.OrderBy(c => c.Claim.Path, StringComparer.OrdinalIgnoreCase).ToList();
+            var folder = DownloadFolderOf(root, ordered[0].File, ordered[0].Claim.Path, upFolders: 1);
+            packages.Add(PackageGroup.ScriptRuntime(group.Key, folder,
+                ordered.Select(c => c.File).ToList(), ordered.Select(c => c.Claim.Path).ToList()));
+        }
+
+        // A settings file the download places in the game's own folders that no package claimed, such as the JSON
+        // a loader mod reads next to its paks: with exactly one script mod in the download it belongs to that mod,
+        // so they install and leave together. With several mods nobody can tell the owner, and the file stays out.
+        var scriptMods = packages.Where(p => p.Kind == PackageKind.ScriptMod).ToList();
+        if (scriptMods.Count == 1)
+        {
+            var attached = gameFiles.Where(g => SettingsFiles.IsPakSettings(g.File)).ToList();
+            if (attached.Count > 0)
+            {
+                gameFiles = gameFiles.Except(attached).ToList();
+                var sole = scriptMods[0];
+                var merged = PackageGroup.ScriptMod(sole.Name, sole.Folder,
+                    sole.Files.Concat(attached.Select(a => a.File)).ToList(),
+                    sole.RelativePaths.Concat(attached.Select(a => a.Path)).ToList());
+                packages[packages.IndexOf(sole)] = merged;
+            }
+        }
+
         // The game files of one folder are one part: a lone file is known by its name, several by the folder they
         // go to, such as the files a download places in the exe folder.
         foreach (var group in gameFiles.GroupBy(g => GamePartFolder(g.Path, projectFolder), StringComparer.OrdinalIgnoreCase))
@@ -352,8 +436,63 @@ public static class PackageScanner
                 continue;
             var atTop = string.Equals(folder, root, StringComparison.OrdinalIgnoreCase);
             var name = atTop ? FileSystem.SafeName(fallbackName, "Mod") : Path.GetFileName(folder);
-            packages.Add(PackageGroup.ExeFiles(name, atTop ? "" : RelativeFolder(root, Path.GetDirectoryName(folder)!), group,
+            var folderInDownload = atTop ? "" : RelativeFolder(root, Path.GetDirectoryName(folder)!);
+            // A folder of nothing but entry DLLs, such as a loader's backup entries: each DLL is its own choice,
+            // never one package that would put all of them into the game at once.
+            if (group.All(IsProxyFile) && group.Count > 1)
+            {
+                foreach (var file in group)
+                    packages.Add(ProxyEntry(PackageGroup.ExeFiles(Path.GetFileName(file), folderInDownload, [file],
+                        [Path.GetFileName(file)])));
+                continue;
+            }
+            packages.Add(PackageGroup.ExeFiles(name, folderInDownload, group,
                 group.Select(f => Path.GetRelativePath(folder, f).Replace('\\', '/')).ToList()));
+        }
+
+        // A loader mod with a main.js can also live in the Mods Menu's Mods folder. That route is offered beside
+        // the original place, and the player chooses one. Without a main.js the menu would not load the mod, so
+        // no route is offered for it.
+        var routable = packages.Where(p => p.Kind == PackageKind.ScriptMod && !p.IsCompatibilityRoute
+            && p.AlternativeOf is null
+            && p.RelativePaths.Any(path => path.Contains($"{LoaderFolder}/{LoaderModsFolder}/", StringComparison.OrdinalIgnoreCase)))
+            .Where(p => p.HasDirectMainJs)
+            .ToList();
+        foreach (var mod in routable)
+        {
+            var routed = mod.RelativePaths
+                .Select(path => path.Replace($"{LoaderFolder}/{LoaderModsFolder}/",
+                    $"{ScriptFolder}/{MenuFolder}/{MenuModsFolder}/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var key = $"route:{mod.Name.ToLowerInvariant()}";
+            mod.AlternativeOf = key;
+            packages.Add(new PackageGroup(mod.Name, mod.Folder, mod.Files, routed, PackageKind.ScriptMod, DeployTarget.InstallRoot)
+            {
+                IsCompatibilityRoute = true,
+                AlternativeOf = key,
+            });
+        }
+
+        // Proxy DLLs that start a loader are alternatives of each other: one of them goes into the game, never all.
+        foreach (var package in packages.Where(p => p.Kind is PackageKind.ExeFiles or PackageKind.File
+            && p.RelativePaths.All(IsProxyFile)).ToList())
+        {
+            var index = packages.IndexOf(package);
+            packages.RemoveAt(index);
+            if (package.Files.Count == 1)
+            {
+                packages.Insert(index, ProxyEntry(package));
+                continue;
+            }
+            for (var i = 0; i < package.Files.Count; i++)
+            {
+                var single = package.Kind == PackageKind.ExeFiles
+                    ? PackageGroup.ExeFiles(Path.GetFileName(package.RelativePaths[i]), package.Folder,
+                        [package.Files[i]], [package.RelativePaths[i]])
+                    : PackageGroup.GameFiles(Path.GetFileName(package.RelativePaths[i]), package.Folder,
+                        [package.Files[i]], [package.RelativePaths[i]]);
+                packages.Insert(index + i, ProxyEntry(single));
+            }
         }
         packages = packages.OrderBy(p => p.Label, NaturalOrder.Instance).ToList();
 
@@ -442,8 +581,30 @@ public static class PackageScanner
     /// <summary>The folders below Saved that hold the player's saves, the game's logs and crash reports.</summary>
     private static readonly string[] NotGameFiles = ["SaveGames", "Logs", "Crashes"];
 
+    internal static bool IsProtectedSavedPath(string path)
+    {
+        var parts = path.Replace('\\', '/').Split('/');
+        return parts.Select((part, i) => part.Equals("Saved", StringComparison.OrdinalIgnoreCase)
+            && i + 1 < parts.Length && NotGameFiles.Contains(parts[i + 1], StringComparer.OrdinalIgnoreCase)).Any(p => p);
+    }
+
     /// <summary>The folder below the project folder where a game with a script engine reads loose scripts.</summary>
     private const string ScriptFolder = "Content/JavaScript";
+
+    /// <summary>The folder below the project folder that holds PBZModLoader's runtime and its mods' folders.</summary>
+    internal const string LoaderFolder = "PBZModLoader";
+
+    /// <summary>Below <see cref="LoaderFolder"/>, the folder with one folder per mod.</summary>
+    internal const string LoaderModsFolder = "mods";
+
+    /// <summary>The folder below the project's script folder that holds the Mods Menu loader and its mods.</summary>
+    internal const string MenuFolder = "PBZModsMenu";
+
+    /// <summary>Below <see cref="MenuFolder"/>, the folder with one folder per mod.</summary>
+    internal const string MenuModsFolder = "Mods";
+
+    /// <summary>The folder of the project's pak mods where a mod may keep the settings it reads.</summary>
+    internal const string PakModsFolder = "~mods";
 
     /// <summary>
     /// A game file's path below the script folder, such as "Menu/main.js" for
@@ -453,6 +614,21 @@ public static class PackageScanner
     {
         var parts = path.Split('/');
         return parts.Length > 3 && StartsAt(parts, 1, ScriptFolder) ? string.Join('/', parts[3..]) : null;
+    }
+
+    /// <summary>
+    /// A game file's path below the project's PBZModLoader folder, such as "mods/Mod/main.js" for
+    /// "ProjectPBZ/PBZModLoader/mods/Mod/main.js"; null for any other file.
+    /// </summary>
+    internal static string? BelowLoaderFolder(string path)
+    {
+        var parts = path.Split('/');
+        for (var i = 0; i + 2 < parts.Length; i++)
+        {
+            if (parts[i].Equals(LoaderFolder, StringComparison.OrdinalIgnoreCase))
+                return string.Join('/', parts[(i + 1)..]);
+        }
+        return null;
     }
 
     /// <summary>
@@ -493,6 +669,11 @@ public static class PackageScanner
             if (!string.IsNullOrWhiteSpace(projectFolder) && parts[i].Equals(projectFolder, StringComparison.OrdinalIgnoreCase)
                 && StartsAt(parts, i + 1, ScriptFolder))
                 return string.Join('/', parts[i..]);
+            // A file in the project's pak-mods folders, such as "ProjectPBZ/Content/Paks/~mods/BossRush.json": the
+            // settings a script mod keeps next to the paks it reads. Packaged files there were claimed before.
+            if (!string.IsNullOrWhiteSpace(projectFolder) && parts[i].Equals(projectFolder, StringComparison.OrdinalIgnoreCase)
+                && parts[(i + 1)..].Contains(PakModsFolder, StringComparer.OrdinalIgnoreCase))
+                return string.Join('/', parts[i..]);
             if (!string.IsNullOrWhiteSpace(exeFolder) && StartsAt(parts, i, exeFolder!))
                 return string.Join('/', parts[i..]);
         }
@@ -511,6 +692,97 @@ public static class PackageScanner
                 return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Proxy DLLs that loader mods such as ReShade, OptiScaler, .asi loaders and PBZ's script loaders put next to a
+    /// game's exe, so Windows loads them in place of its own.
+    /// </summary>
+    internal static readonly string[] ProxyDllNames =
+    [
+        "dxgi", "d3d9", "d3d11", "d3d12", "dinput8", "version", "winmm", "winhttp", "dsound", "xinput1_3", "xinput1_4",
+        "opengl32", "nvngx", "hid",
+    ];
+
+    /// <summary>A proxy DLL that starts a loader by standing in for a Windows library: one of several alternatives.</summary>
+    private static bool IsProxyFile(string place) =>
+        FileSystem.HasExtension(place, [".dll"])
+        && ProxyDllNames.Contains(Path.GetFileNameWithoutExtension(place), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The key of the alternatives group that the proxy DLLs of one download share.</summary>
+    private const string ProxyAlternativeKey = "proxy";
+
+    /// <summary>Marks a package of proxy DLLs as the entry choice it is: the player installs one, not all.</summary>
+    private static PackageGroup ProxyEntry(PackageGroup package)
+    {
+        package.AlternativeOf = ProxyAlternativeKey;
+        package.IsProxyEntry = true;
+        return package;
+    }
+
+    /// <summary>One claimed file of a script loader's tree: the path it keeps below the install folder, the mod folder
+    /// it belongs to (null for the loader's own runtime), and the loader's name.</summary>
+    internal sealed record LoaderClaim(string Path, string? ModRoot, string Loader);
+
+    /// <summary>
+    /// A file of a script loader's tree, at any depth of the download: PBZModLoader's runtime below the project folder
+    /// and its bootstrap below the script folder, its mods in PBZModLoader/mods/&lt;id&gt;, and Mods Menu's runtime and
+    /// mods below Content/JavaScript/PBZModsMenu (its own in Mods/&lt;id&gt;). Documents stay out, and only a file
+    /// below the mods folder of a mod counts as a mod; anything else of the tree is the loader's runtime.
+    /// </summary>
+    internal static LoaderClaim? LoaderClaimOf(string relativePath, string? projectFolder)
+    {
+        if (string.IsNullOrWhiteSpace(projectFolder) || SettingsFiles.IsDocument(relativePath))
+            return null;
+        var parts = relativePath.Split('/');
+        for (var i = 0; i + 2 < parts.Length; i++)
+        {
+            if (!parts[i].Equals(projectFolder, StringComparison.OrdinalIgnoreCase))
+                continue;
+            // Mods Menu: ProjectPBZ/Content/JavaScript/PBZModsMenu[/Mods/<id>/<file>].
+            if (StartsAt(parts, i + 1, $"{ScriptFolder}/{MenuFolder}"))
+            {
+                const int mods = 4; // the part after .../PBZModsMenu
+                if (!parts[i + mods].Equals(MenuModsFolder, StringComparison.OrdinalIgnoreCase))
+                    return new LoaderClaim(FromParts(parts, i), null, MenuFolder);
+                // A file straight in the Mods folder belongs to no mod and is no file of the menu either.
+                return i + mods + 2 < parts.Length
+                    ? new LoaderClaim(FromParts(parts, i), FromParts(parts, i, i + mods + 2), MenuFolder)
+                    : null;
+            }
+            // PBZModLoader's bootstrap: ProjectPBZ/Content/JavaScript/PBZModLoader/<file>.
+            if (StartsAt(parts, i + 1, $"{ScriptFolder}/{LoaderFolder}"))
+                return new LoaderClaim(FromParts(parts, i), null, LoaderFolder);
+            // PBZModLoader's runtime and mods: ProjectPBZ/PBZModLoader[/mods/<id>/<file>].
+            if (parts[i + 1].Equals(LoaderFolder, StringComparison.OrdinalIgnoreCase))
+            {
+                const int mods = 2; // the part after .../PBZModLoader
+                if (!parts[i + mods].Equals(LoaderModsFolder, StringComparison.OrdinalIgnoreCase))
+                    return new LoaderClaim(FromParts(parts, i), null, LoaderFolder);
+                // A file straight in the mods folder belongs to no mod and is no file of the loader either.
+                return i + mods + 2 < parts.Length
+                    ? new LoaderClaim(FromParts(parts, i), FromParts(parts, i, i + mods + 2), LoaderFolder)
+                    : null;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>The path below the install folder of a claimed file, from its position in the download.</summary>
+    private static string FromParts(string[] parts, int start, int? end = null) =>
+        string.Join('/', parts[start..(end ?? parts.Length)]);
+
+    /// <summary>
+    /// The download folder <paramref name="upFolders"/> levels above a claimed file's folder, below any wrapper
+    /// folders the download places around the tree, such as "ProjectPBZ/PBZModLoader/mods" for a loader mod.
+    /// </summary>
+    private static string DownloadFolderOf(string root, string file, string claimPath, int upFolders = 0)
+    {
+        var depth = claimPath.Split('/').Length;
+        var parts = Path.GetRelativePath(root, file).Split('\\', '/');
+        var folder = string.Join('/', parts.Take(parts.Length - depth)
+            .Concat(claimPath.Split('/').SkipLast(1 + upFolders)));
+        return folder == "/" ? "" : folder;
     }
 
     /// <summary>The leading folders shared by every path, such as "Mod/Data" for "Mod/Data/A" and "Mod/Data/B".</summary>

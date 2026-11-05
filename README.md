@@ -1,3 +1,21 @@
+# PBZ Mod Hub（修改版）
+
+Based on UE MM by KintaroModding and contributors: https://github.com/KintaroModding/uemodmanager.
+This is a modified build, not an official UE MM release. Source: https://github.com/xaxazzzz/uemodmanager/tree/codex/manual-mod-adoption.
+
+- 新下载：拖入压缩包或模组文件夹，核对文件去向后安装。
+- 手装模组：在“模组”页点击“接管已安装的模组…”。接管只复制到管理器库，不改写游戏文件；之后可启停、更新和卸载。
+- PBZModLoader 脚本：可明确选择原生目录或 Mods Menu 兼容路径。兼容路径要求 main.js 和已安装的 Mods Menu；第三方依赖仍可能不兼容。
+- 未识别结构：按作者说明填写相对游戏根目录的目标目录，先预览再安装。根目录填 `.`；拒绝逃逸路径、链接和存档/日志/崩溃目录。
+- 加载状态来自日志；“已启用”“已部署”不代表加载成功，没有可靠记录时显示“尚未验证”。
+- 接管配置会保留和备份；缺少作者原始配置时不提供重置默认设置。
+- 共享框架不作为普通插件默认接管，代理 DLL 默认不勾选。原生入口可单独管理，未纳管的编译工具和日志会保留。
+- 此修改版关闭官方程序自动更新，防止扩展被上游 EXE 覆盖；UE4SS 更新保留。程序更新需从本分支构建。
+
+下方保留上游说明。构建需要 .NET 10 SDK，运行需要 .NET 8 Windows Desktop Runtime。
+
+---
+
 # UE MM
 
 A mod manager for Unreal Engine games. The first and, for now, only supported

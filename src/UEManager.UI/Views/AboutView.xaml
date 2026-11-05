@@ -26,6 +26,8 @@
             <TextBlock Margin="0,10,0,0" Style="{StaticResource Text.Display}" Text="{Binding AppName}" />
             <Rectangle Width="200" Height="2" Margin="0,14,0,14" HorizontalAlignment="Left" Fill="{StaticResource Brush.Stroke}" />
             <TextBlock Style="{StaticResource Text.Small}" Text="{Binding AppVersionText}" />
+            <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="{ui:Loc 'Modified version: PBZ Mod Hub. Based on UE MM by KintaroModding and contributors.'}" />
+            <TextBlock Text="https://github.com/KintaroModding/uemodmanager" />
         </StackPanel>
 
         <Border Margin="0,28,0,0" Style="{StaticResource Card}">

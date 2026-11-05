@@ -4,7 +4,7 @@ namespace UEManager.UI.Services;
 
 internal static class AppInfo
 {
-    public const string Name = "UE MM";
+    public const string Name = "PBZ Mod Hub";
 
     /// <summary>How the release zips start, as publish.ps1 names them.</summary>
     public const string ReleaseFilePrefix = "uemm";
@@ -19,12 +19,8 @@ internal static class AppInfo
     /// The newest release, read at every start for the update check, in order: copies of GitHub's answer with a copy of
     /// the zip on Cloudflare Pages (the KintaroModding/metadata repo, deployed on every push), then GitHub itself.
     /// </summary>
-    public static readonly IReadOnlyList<string> LatestReleaseUrls =
-    [
-        "https://metadata.openmods.nexus/uemodmanager/app/latest.json",
-        "https://uemm-metadata.pages.dev/uemodmanager/app/latest.json",
-        LatestReleaseUrl,
-    ];
+    // This modified build has no binary update channel; upstream updates would discard its adoption features.
+    public static readonly IReadOnlyList<string> LatestReleaseUrls = [];
 
     public const string ReleasesPageUrl = ProjectUrl + "/releases/latest";
 

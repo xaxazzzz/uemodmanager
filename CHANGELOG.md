@@ -4,6 +4,12 @@ What changed in each release of UE MM, newest first: one short line per change.
 The app shows this list (the **Changelog** link in the sidebar's update box), so
 every release adds its section at the top, as `## <version> (<yyyy-mm-dd>)`.
 
+## 1.6.0-manual.1 (2026-11-05)
+- Modified PBZ Mod Hub build based on upstream 1.5.5; this is not an official UE MM release.
+- Scan and adopt installed PAK, UE4SS and PBZ script mods without moving their game files; keep settings and backups.
+- Recognize PBZModLoader packages, explicit Mods Menu routes and alternative proxy entries; manually map unknown layouts with a destination preview.
+- Separate enabled/deployed status from timestamped loader success or failure.
+
 ## 1.5.5 (2026-11-04)
 - Script mods: files below Content/JavaScript now install, such as Mods Menu
 - Refresh button on the Mods page, to check the mods folder again without a restart

@@ -37,6 +37,12 @@ public sealed partial class MainViewModel : LocalizedObservableObject
     private DateTime? gameRunningSince;
     private bool watching;
 
+    /// <summary>When the last game start the manager saw began, so the loaders' notes are judged against it.</summary>
+    private DateTime? lastGameStart;
+
+    /// <summary>What the script loaders wrote at the last game start: the mods they found, and when.</summary>
+    private ScriptLoaderDiscovery? loaderDiscovery;
+
     /// <summary>
     /// The app's only connection: the UE4SS manifest and the update check at start, the openmods
     /// lists and covers when the openmods page opens, and the downloads the user starts.
@@ -96,11 +102,16 @@ public sealed partial class MainViewModel : LocalizedObservableObject
         {
             var running = await Task.Run(() => GameProcess.IsRunning(game));
             if (running)
-                gameRunningSince ??= DateTime.Now;
+            {
+                gameRunningSince ??= DateTime.Now.AddSeconds(-10);
+                lastGameStart = gameRunningSince;
+                ReadLoaderDiscovery(game);
+            }
             else if (gameRunningSince is { } since)
             {
                 gameRunningSince = null;
                 await ReportUe4ssErrorsAsync(game, since);
+                ReadLoaderDiscovery(game);
             }
         }
         finally
@@ -108,6 +119,34 @@ public sealed partial class MainViewModel : LocalizedObservableObject
             watching = false;
         }
     }
+
+    /// <summary>
+    /// After the game closed, reads what the script loaders wrote then: which of their mods they found. A note from
+    /// before this game start says nothing, so only a fresh one replaces the marks.
+    /// </summary>
+    private void ReadLoaderDiscovery(GameInstall game)
+    {
+        try
+        {
+            var read = ScriptLoaders.Read(game);
+            if (loaderDiscovery?.WrittenAt != read?.WrittenAt
+                || (loaderDiscovery is null) != (read is null)
+                || (read is not null && loaderDiscovery is not null
+                    && (read.Mods.Count != loaderDiscovery.Mods.Count || read.Mods.Any(p => !loaderDiscovery.Mods.TryGetValue(p.Key, out var previous) || p.Value != previous))))
+            {
+                loaderDiscovery = read;
+                RefreshMods();
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn($"The script loaders' notes could not be read: {ex.Message}");
+        }
+    }
+
+    /// <summary>What the loaders' notes say of this script mod at the last game start the manager saw.</summary>
+    internal LoaderRuntimeState LoaderState(ModRecord mod) =>
+        ScriptLoaders.StateOf(mod, loaderDiscovery, lastGameStart ?? DateTime.MinValue);
 
     private async Task ReportUe4ssErrorsAsync(GameInstall game, DateTime since)
     {
@@ -268,6 +307,9 @@ public sealed partial class MainViewModel : LocalizedObservableObject
 
     [ObservableProperty]
     private InstallDialogViewModel? installDialog;
+
+    [ObservableProperty]
+    private AdoptionDialogViewModel? adoptionDialog;
 
     [ObservableProperty]
     private Ue4ssGuideViewModel? ue4ssGuide;
@@ -1240,6 +1282,41 @@ public sealed partial class MainViewModel : LocalizedObservableObject
             await InstallAsync(dialog.FolderNames);
     }
 
+    /// <summary>
+    /// Scans the game for mods installed by hand, whatever the mods folder says about unmanaged files: pak groups,
+    /// UE4SS mods, script mods of the two loaders, and DLLs next to the exe. The review shows them; the player
+    /// chooses what to adopt, and the adoption takes the chosen ones over where they are.
+    /// </summary>
+    [RelayCommand]
+    private async Task ScanForAdoption()
+    {
+        if (!EnsureGame() || IsBusy || AdoptionDialog is not null)
+            return;
+        InstalledScan? scan = null;
+        if (!await RunAsync(L.T("Looking for mods installed by hand…"), async () => scan = await Task.Run(() => manager!.ScanInstalled())))
+            return;
+        if (scan!.Candidates.Count == 0)
+        {
+            ShowToast(L.T("No mods to adopt were found. Everything in the game's mod folders is already managed."));
+            return;
+        }
+        var dialog = new AdoptionDialogViewModel(manager!, scan);
+        AdoptionDialog = dialog;
+        var choice = await dialog.Result;
+        AdoptionDialog = null;
+        if (choice is null)
+            return;
+        IReadOnlyList<ModRecord>? adopted = null;
+        if (await RunAsync(L.T("Adopting the mods…"), async () => adopted = await Task.Run(() => manager!.AdoptInstalled(dialog.Scan, choice.Candidates))))
+        {
+            RefreshMods();
+            SelectedPage = "Mods";
+            ShowToast(adopted!.Count == 1
+                ? L.F($"Adopted \"{adopted[0].Name}\". It is in your list now.")
+                : L.Plural(adopted.Count, "Adopted {0} mod. It is in your list now.", "Adopted {0} mods. They are in your list now."));
+        }
+    }
+
     [RelayCommand]
     private async Task LocateGame()
     {
@@ -1609,9 +1686,12 @@ public sealed partial class MainViewModel : LocalizedObservableObject
         CheckGameBuild();
         ue4ssErrors = null;
         unofficialUe4ssFiles = null;
+        loaderDiscovery = null;
+        lastGameStart = null;
         RefreshMods();
         if (Game is { } game)
         {
+            ReadLoaderDiscovery(game);
             _ = ReadUe4ssErrorsAsync(game);
             _ = CheckUe4ssBuildAsync();
         }
@@ -1733,7 +1813,7 @@ public sealed partial class MainViewModel : LocalizedObservableObject
     }
 
     /// <summary>A dialog, the busy screen or the drop target covers the window.</summary>
-    internal bool HasOverlay => IsBusy || IsDragOver || InstallDialog is not null || Ue4ssGuide is not null
+    internal bool HasOverlay => IsBusy || IsDragOver || InstallDialog is not null || AdoptionDialog is not null || Ue4ssGuide is not null
         || Confirm is not null || HelpDialog is not null || ResetDialog is not null || SettingsEditor is not null || ModDetails is not null
         || ModSets is not null || Update.IsDialogOpen || Update.IsChangelogOpen || IsPreReleaseDialogOpen || IsRemoteInfoOpen || IsRecommendedNotesOpen;
 

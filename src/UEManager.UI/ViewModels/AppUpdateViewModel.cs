@@ -64,7 +64,7 @@ public sealed partial class AppUpdateViewModel(MainViewModel owner, HttpClient h
     /// The update check for a help report, in English like the rest of it: where the release list came from (a host,
     /// never an address) and what it said.
     /// </summary>
-    internal string ReportText => State switch
+    internal string ReportText => releaseUrls.Count == 0 ? "modified build; update from source" : State switch
     {
         UpdateState.Checking => "still running",
         UpdateState.Failed => $"failed ({failure?.Message})",
@@ -76,7 +76,7 @@ public sealed partial class AppUpdateViewModel(MainViewModel owner, HttpClient h
             }}, {(State == UpdateState.Available ? "update available" : "up to date")} (newest {release?.Version})",
     };
 
-    public string StatusText => State switch
+    public string StatusText => releaseUrls.Count == 0 ? L.T("Modified build · update from source") : State switch
     {
         UpdateState.Checking => L.T("Checking for updates…"),
         UpdateState.UpToDate => L.T("Up to date"),
@@ -99,7 +99,7 @@ public sealed partial class AppUpdateViewModel(MainViewModel owner, HttpClient h
         _ => "",
     };
 
-    public string? StatusHint => State switch
+    public string? StatusHint => releaseUrls.Count == 0 ? L.T("Official app updates are disabled for this modified build. UE4SS updates remain available.") : State switch
     {
         UpdateState.UpToDate => L.F($"Version {AppInfo.Version} is the newest release."),
         UpdateState.Available => L.T("Show the update"),
@@ -160,6 +160,11 @@ public sealed partial class AppUpdateViewModel(MainViewModel owner, HttpClient h
     /// </summary>
     public async Task CheckAsync()
     {
+        if (releaseUrls.Count == 0)
+        {
+            State = UpdateState.UpToDate;
+            return;
+        }
         State = UpdateState.Checking;
         try
         {

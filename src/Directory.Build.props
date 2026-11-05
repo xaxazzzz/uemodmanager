@@ -4,11 +4,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>12</LangVersion>
-    <Version>1.5.5</Version>
+    <Version>1.6.0-manual.1</Version>
     <!-- A pre-release shows a yellow "Pre-release" box below About that explains what it means. -->
     <PreRelease>false</PreRelease>
     <Authors>KintaroModding</Authors>
-    <Product>UE MM</Product>
+    <Product>PBZ Mod Hub</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- Symbols live inside the assemblies, so a release is the exe and nothing else. -->
     <DebugType>embedded</DebugType>
