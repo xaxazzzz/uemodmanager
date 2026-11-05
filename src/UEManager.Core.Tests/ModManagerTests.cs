@@ -64,6 +64,22 @@ public class ModManagerTests : IDisposable
     }
 
     [Fact]
+    public void Unmanaged_warning_ignores_logs_and_temporary_files_but_keeps_mods_and_settings()
+    {
+        var files = new[] { "BossRush.log", "nested/runtime.LOG", "session.tmp", "Unknown_P.pak", "BossRush.json", "settings.ini", "PBZAutoExecution.txt" };
+        foreach (var file in files)
+        {
+            var path = Deployed(file);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "unchanged");
+        }
+
+        Assert.Equal(new[] { "BossRush.json", "PBZAutoExecution.txt", "settings.ini", "Unknown_P.pak" }.Order(),
+            manager.UnmanagedFiles().Order());
+        Assert.All(files, file => Assert.Equal("unchanged", File.ReadAllText(Deployed(file))));
+    }
+
+    [Fact]
     public void A_changed_file_is_never_deleted()
     {
         var mod = Install(Download("Sharp"));

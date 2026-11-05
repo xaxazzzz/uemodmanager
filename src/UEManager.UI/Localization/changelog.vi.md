@@ -2,6 +2,9 @@
 
 Bản tiếng Việt của CHANGELOG.md: giữ nguyên tiêu đề, mỗi thay đổi một dòng. Phiên bản chưa dịch hiển thị bằng tiếng Anh.
 
+## 1.6.0-manual.2 (2026-11-05)
+- Bỏ qua tệp .log và .tmp trong cảnh báo tệp chưa quản lý, không xóa chúng; vẫn hiển thị mod và cấu hình chưa quản lý.
+
 ## 1.6.0-manual.1 (2026-11-05)
 - Bản sửa đổi PBZ Mod Hub dựa trên 1.5.5; không phải bản phát hành UE MM chính thức.
 - Quét và tiếp quản mod PAK, UE4SS, PBZ đã cài mà không di chuyển tệp game; giữ cấu hình và bản sao lưu.

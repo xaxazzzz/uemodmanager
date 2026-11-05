@@ -1247,7 +1247,7 @@ public sealed partial class ModManager
         return ModIntegrity.Intact;
     }
 
-    /// <summary>Files in the ~mods folder that no installed mod deployed, relative to that folder.</summary>
+    /// <summary>Unmanaged files in ~mods, excluding runtime logs and temporary files, relative to that folder.</summary>
     public IReadOnlyList<string> UnmanagedFiles()
     {
         if (!Directory.Exists(Game.ModsPath))
@@ -1261,7 +1261,7 @@ public sealed partial class ModManager
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         return Directory.EnumerateFiles(Game.ModsPath, "*", SearchOption.AllDirectories)
-            .Where(f => !owned.Contains(Path.GetFullPath(f)))
+            .Where(f => !owned.Contains(Path.GetFullPath(f)) && !FileSystem.HasExtension(f, [".log", ".tmp"]))
             .Select(f => Path.GetRelativePath(Game.ModsPath, f))
             .ToList();
     }

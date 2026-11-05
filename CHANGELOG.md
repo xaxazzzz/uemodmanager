@@ -4,6 +4,9 @@ What changed in each release of UE MM, newest first: one short line per change.
 The app shows this list (the **Changelog** link in the sidebar's update box), so
 every release adds its section at the top, as `## <version> (<yyyy-mm-dd>)`.
 
+## 1.6.0-manual.2 (2026-11-05)
+- Ignore .log and .tmp files in the unmanaged-file warning without deleting them; keep unknown mods and settings visible.
+
 ## 1.6.0-manual.1 (2026-11-05)
 - Modified PBZ Mod Hub build based on upstream 1.5.5; this is not an official UE MM release.
 - Scan and adopt installed PAK, UE4SS and PBZ script mods without moving their game files; keep settings and backups.
